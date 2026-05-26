@@ -288,6 +288,50 @@ body{font-family:"Sora",sans-serif;background:var(--bg);color:var(--ink);font-si
     <div class="card"><div class="card-h"><div class="card-t"><div class="card-ic">📊</div>Actual vs anterior</div></div><div class="cw" style="height:260px"><canvas id="chartComp"></canvas></div></div>
     <div class="card"><div class="card-h"><div class="card-t"><div class="card-ic">📋</div>Resumen comparativo</div></div><div id="compTable"><div class="empty"><div>⏳</div><div>Cargando...</div></div></div></div>
   </div>
+
+  <!-- MES A MES -->
+  <div class="card" style="margin-top:16px">
+    <div class="card-h">
+      <div class="card-t"><div class="card-ic">📅</div>Comparativo mes a mes — día a día</div>
+    </div>
+    <!-- Controles -->
+    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:16px;padding:12px;background:var(--line2);border-radius:var(--r-sm);">
+      <span class="filter-label">Métrica:</span>
+      <select class="filter-select" id="cmpMesMetrica">
+        <option value="leads">Leads</option>
+        <option value="spend">Gasto</option>
+        <option value="impressions">Impresiones</option>
+        <option value="clicks">Clics</option>
+        <option value="ctr">CTR%</option>
+        <option value="cpm">CPM</option>
+        <option value="cpc">CPC</option>
+      </select>
+      <div class="filter-sep"></div>
+      <span class="filter-label" style="color:#1877F2;font-weight:800">Período A:</span>
+      <input type="date" class="filter-input" id="cmpAFrom" style="border-color:#1877F2"/>
+      <span style="font-size:11px;color:var(--ink3)">→</span>
+      <input type="date" class="filter-input" id="cmpATo" style="border-color:#1877F2"/>
+      <div class="filter-sep"></div>
+      <span class="filter-label" style="color:#E1306C;font-weight:800">Período B:</span>
+      <input type="date" class="filter-input" id="cmpBFrom" style="border-color:#E1306C"/>
+      <span style="font-size:11px;color:var(--ink3)">→</span>
+      <input type="date" class="filter-input" id="cmpBTo" style="border-color:#E1306C"/>
+      <button class="btn-apply" onclick="renderComparativoMes()" style="background:#C9A227">📊 Comparar</button>
+    </div>
+    <!-- Resumen rápido -->
+    <div id="cmpMesSummary" style="display:none;margin-bottom:12px">
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+        <div class="kpi" style="--acc:#1877F2" id="cmpKpiA"></div>
+        <div class="kpi" style="--acc:#E1306C" id="cmpKpiB"></div>
+        <div class="kpi" style="--acc:var(--gold-md)" id="cmpKpiDiff"></div>
+      </div>
+    </div>
+    <!-- Gráfica -->
+    <div id="cmpMesLoading" style="display:none" class="empty"><div class="spinner-lg" style="width:32px;height:32px;border-width:3px"></div><div>Consultando Meta Ads...</div></div>
+    <div class="cw" style="height:300px"><canvas id="chartCmpMes"></canvas></div>
+    <!-- Tabla detalle -->
+    <div id="cmpMesTable" style="margin-top:14px;overflow-x:auto"></div>
+  </div>
 </section>
 </div>
 
@@ -561,6 +605,95 @@ function renderComparativo() {
   });
 }
 
+function renderComparativoMes() {
+  var met = document.getElementById('cmpMesMetrica').value;
+  var aFrom = document.getElementById('cmpAFrom').value;
+  var aTo   = document.getElementById('cmpATo').value;
+  var bFrom = document.getElementById('cmpBFrom').value;
+  var bTo   = document.getElementById('cmpBTo').value;
+  if (!aFrom||!aTo||!bFrom||!bTo) { alert('Por favor completa los 4 rangos de fechas.'); return; }
+
+  var ins = 'spend,impressions,reach,clicks,ctr,cpm,cpc,frequency,actions';
+  var metNames = {leads:'Leads',spend:'Gasto',impressions:'Impresiones',clicks:'Clics',ctr:'CTR%',cpm:'CPM',cpc:'CPC'};
+  var tf2={family:'Sora',size:11},tc='#64748B',gc='rgba(0,0,0,0.04)';
+
+  document.getElementById('cmpMesLoading').style.display='flex';
+  document.getElementById('cmpMesSummary').style.display='none';
+  document.getElementById('cmpMesTable').innerHTML='';
+
+  function getVal(d) {
+    if (met==='leads') return getLeads(d.actions);
+    return parseFloat(d[met])||0;
+  }
+  function fVal(v) {
+    if (met==='spend'||met==='cpm'||met==='cpc') return fM(v);
+    if (met==='ctr') return fPct(v);
+    return fN(v);
+  }
+  function labelRange(from, to) {
+    return from.slice(5)+' → '+to.slice(5);
+  }
+
+  var done=0, dA=[], dB=[];
+  function onDone() {
+    done++;
+    if (done<2) return;
+    document.getElementById('cmpMesLoading').style.display='none';
+
+    // Sort by date
+    dA.sort(function(a,b){return a.date_start>b.date_start?1:-1;});
+    dB.sort(function(a,b){return a.date_start>b.date_start?1:-1;});
+
+    var vA = dA.map(getVal);
+    var vB = dB.map(getVal);
+    var maxLen = Math.max(vA.length, vB.length);
+
+    // Labels = Día 1, Día 2 ...
+    var labels = [];
+    for (var i=1;i<=maxLen;i++) labels.push('Día '+i);
+
+    // Totals
+    var totA = vA.reduce(function(s,x){return s+x;},0);
+    var totB = vB.reduce(function(s,x){return s+x;},0);
+    var diffPct = totA>0 ? Math.round((totB-totA)/totA*100) : 0;
+    var pos = diffPct>=0;
+
+    // KPI cards
+    document.getElementById('cmpMesSummary').style.display='block';
+    document.getElementById('cmpKpiA').innerHTML='<div class="kl" style="color:#1877F2">Período A · '+labelRange(aFrom,aTo)+'</div><div class="kv" style="color:#1877F2">'+fVal(totA)+'</div><div class="ks">'+metNames[met]+' total</div>';
+    document.getElementById('cmpKpiB').innerHTML='<div class="kl" style="color:#E1306C">Período B · '+labelRange(bFrom,bTo)+'</div><div class="kv" style="color:#E1306C">'+fVal(totB)+'</div><div class="ks">'+metNames[met]+' total</div>';
+    document.getElementById('cmpKpiDiff').innerHTML='<div class="kl">Variación B vs A</div><div class="kv" style="color:'+(pos?'var(--green)':'var(--red-md)')+';">'+(diffPct>=0?'↑ +':'↓ ')+diffPct+'%</div><div class="ks">'+(pos?'Mejora':'Caída')+' respecto al período A</div>';
+
+    mkChart('chartCmpMes',{type:'line',data:{labels:labels,datasets:[
+      {label:'A: '+labelRange(aFrom,aTo),data:vA,borderColor:'#1877F2',backgroundColor:'rgba(24,119,242,0.08)',tension:0.4,fill:true,pointRadius:4,pointBackgroundColor:'#1877F2',borderWidth:2},
+      {label:'B: '+labelRange(bFrom,bTo),data:vB,borderColor:'#E1306C',backgroundColor:'rgba(225,48,108,0.08)',tension:0.4,fill:true,pointRadius:4,pointBackgroundColor:'#E1306C',borderWidth:2}
+    ]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{font:tf2,color:tc,boxWidth:10}}},scales:{x:{ticks:{color:tc,font:tf2},grid:{display:false}},y:{ticks:{color:tc,font:tf2,callback:function(v){return fVal(v);}},grid:{color:gc}}}}});
+
+    // Tabla comparativa
+    var th='<table class="dtable"><thead><tr><th>Día</th><th>Fecha A</th><th style="color:#1877F2">'+metNames[met]+' A</th><th>Fecha B</th><th style="color:#E1306C">'+metNames[met]+' B</th><th>Var.</th></tr></thead><tbody>';
+    for (var j=0;j<maxLen;j++) {
+      var fa=dA[j]?dA[j].date_start:'—';
+      var fb=dB[j]?dB[j].date_start:'—';
+      var va=vA[j]||0, vb=vB[j]||0;
+      var d=va>0?Math.round((vb-va)/va*100):null;
+      var dStr=d===null?'—':(d>=0?'↑ +':'↓ ')+d+'%';
+      var dColor=d===null?'var(--ink3)':d>=0?'var(--green)':'var(--red-md)';
+      th+='<tr><td class="nc">Día '+(j+1)+'</td><td class="mo">'+fa+'</td><td class="mo" style="color:#1877F2;font-weight:700">'+fVal(va)+'</td><td class="mo">'+fb+'</td><td class="mo" style="color:#E1306C;font-weight:700">'+fVal(vb)+'</td><td class="mo" style="color:'+dColor+';font-weight:700">'+dStr+'</td></tr>';
+    }
+    th+='</tbody></table>';
+    document.getElementById('cmpMesTable').innerHTML=th;
+  }
+
+  apiCall('insights',{fields:ins,time_increment:1,time_range:'{"since":"'+aFrom+'","until":"'+aTo+'"}',limit:90},function(err,d){
+    dA=(!err&&d&&d.data)||[];
+    onDone();
+  });
+  apiCall('insights',{fields:ins,time_increment:1,time_range:'{"since":"'+bFrom+'","until":"'+bTo+'"}',limit:90},function(err,d){
+    dB=(!err&&d&&d.data)||[];
+    onDone();
+  });
+}
+
 function showTab(name,el){document.querySelectorAll('.section').forEach(function(s){s.classList.remove('active');});document.querySelectorAll('.tab').forEach(function(t){t.classList.remove('active');});document.getElementById('sec-'+name).classList.add('active');el.classList.add('active');}
 
 setTime();setInterval(setTime,60000);
@@ -571,6 +704,13 @@ window.addEventListener('DOMContentLoaded', function() {
   var prevM1 = new Date(today.getFullYear(), today.getMonth() - 1, 1);
   document.getElementById('fDateFrom').value = fmt(prevM1);
   document.getElementById('fDateTo').value = fmt(today);
+  // Defaults comparativo mes a mes
+  var prevMEnd = new Date(today.getFullYear(), today.getMonth(), 0);
+  var currM1   = new Date(today.getFullYear(), today.getMonth(), 1);
+  document.getElementById('cmpAFrom').value = fmt(prevM1);
+  document.getElementById('cmpATo').value   = fmt(prevMEnd);
+  document.getElementById('cmpBFrom').value = fmt(currM1);
+  document.getElementById('cmpBTo').value   = fmt(today);
   loadAll();
 });
 </script>
